@@ -1,6 +1,8 @@
 local Debris = game:GetService("Debris")
+local Players = game:GetService("Players") 
 local Tool = script.Parent
 
+--// EVENTS
 local Remote = Tool:FindFirstChild("CombatEvent")
 if not Remote then
 	Remote = Instance.new("RemoteEvent"); Remote.Name = "CombatEvent"; Remote.Parent = Tool
@@ -66,8 +68,7 @@ local function CreateParryEffect(Position)
 	end
 end
 
---// COMBAT
--- Updated to accept AimVector
+--// COMBAT LOGIC
 local function PerformCombatAction(Char, Action, AimVector)
 	local Root = Char:FindFirstChild("HumanoidRootPart")
 	if not Root then return end
@@ -97,24 +98,34 @@ local function PerformCombatAction(Char, Action, AimVector)
 		local Shield = Char:FindFirstChild("BlockVisual")
 		if Shield then Shield:Destroy() end
 
+	elseif Action == "ParrySuccess" then 
+		-- /// RESET COOLDOWN ACTION ///
+		IsBlocking = false
+		LastBlockEndTime = 0 -- Reset Server Cooldown Timer
+		Tool:SetAttribute("BlockStartTimestamp", 0)
+		
+		local Shield = Char:FindFirstChild("BlockVisual")
+		if Shield then Shield:Destroy() end
+
+		-- Notify Client to reset local cooldown immediately
+		local Player = Players:GetPlayerFromCharacter(Char)
+		if Player then
+			Remote:FireClient(Player, "ParrySuccess")
+		end
+
 	elseif Action == "Attack" then
 		if IsBlocking then return end 
 
-		-- // UPDATED RANGE & DIRECTION //
-		-- Box Size: 6x6 wide, 12 long (Much longer reach)
+		-- Range / Hitbox Logic
 		local BoxSize = Vector3.new(14, 5, 12)
 		local StartPos = Root.Position
-
-		-- Calculate Direction
 		local Direction
 		if typeof(AimVector) == "Vector3" then
-			Direction = AimVector.Unit -- Player Camera Direction
+			Direction = AimVector.Unit 
 		else
-			Direction = Root.CFrame.LookVector -- NPC / Fallback
+			Direction = Root.CFrame.LookVector 
 		end
 
-		-- Create CFrame looking in that direction
-		-- Offset forward by half the length (6 studs)
 		local Origin = CFrame.lookAt(StartPos, StartPos + Direction)
 		local BoxCFrame = Origin * CFrame.new(0, 0, -6)
 
@@ -138,26 +149,37 @@ local function PerformCombatAction(Char, Action, AimVector)
 				local EnemyIsBlocking = false
 				if EnemyChar:FindFirstChild("BlockVisual") then EnemyIsBlocking = true end
 
-				if EnemyIsBlocking then
-					local Dist = (Root.Position - EnemyRoot.Position).Magnitude
-					if Dist > 2 then 
-						local VectorToAttacker = (Root.Position - EnemyRoot.Position).Unit
-						local DefenderLook = EnemyRoot.CFrame.LookVector
-						if VectorToAttacker:Dot(DefenderLook) < 0.2 then EnemyIsBlocking = false end
-					end
-				end
+				-- [[ OMNI-DIRECTIONAL CHANGE ]]
+				-- Previous code that checked VectorToAttacker:Dot(DefenderLook) is removed.
+				-- Now, if EnemyIsBlocking is true, it works 360 degrees.
 
 				if EnemyIsBlocking then
 					local EnemyTool = EnemyChar:FindFirstChild("NeonBlade")
 					local EnemyBlockTime = 0
 					if EnemyTool then EnemyBlockTime = EnemyTool:GetAttribute("BlockStartTimestamp") or 0 end
 
+					-- /// PARRY CHECK ///
 					if (os.clock() - EnemyBlockTime) <= ParryWindow then
 						CreateParryEffect(Root.Position)
-						StunPlayer(Char) 
+						StunPlayer(Char) -- Stun Attacker
+						
+						-- /// TRIGGER RESET ON DEFENDER ///
+						if EnemyTool then
+							local EnemyNPC = EnemyTool:FindFirstChild("NPCCombat")
+							if EnemyNPC then 
+								EnemyNPC:Fire("ParrySuccess") 
+							end
+							-- For Players:
+							local DefPlayer = Players:GetPlayerFromCharacter(EnemyChar)
+							local DefRemote = EnemyTool:FindFirstChild("CombatEvent")
+							if DefPlayer and DefRemote then
+								DefRemote:FireClient(DefPlayer, "ParrySuccess")
+							end
+						end
 						return 
 					end
 
+					-- Regular Block Damage
 					local CurrentBlockHP = EnemyTool and EnemyTool:GetAttribute("BlockHP") or BlockMaxHP
 					local NewBlockHP = CurrentBlockHP - Damage
 
@@ -188,9 +210,6 @@ end
 
 --// EVENTS
 Remote.OnServerEvent:Connect(function(Player, Action, Arg1)
-	-- Arg1 is now AimVector (for Attacks) OR IsDebug (for Blocks)
-	-- But PerformCombatAction handles AimVector.
-	-- We pass Arg1 as AimVector.
 	if Player.Character then PerformCombatAction(Player.Character, Action, Arg1) end
 end)
 
@@ -210,5 +229,3 @@ task.spawn(function()
 		end
 	end
 end)
--- jip jip 
-print("OWOWOWOWO")

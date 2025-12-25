@@ -5,6 +5,7 @@ local TweenService = game:GetService("TweenService")
 local Player = Players.LocalPlayer
 
 --// 1. CREATE UI
+-- I HATE NIG
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MovementDashboard"
 ScreenGui.ResetOnSpawn = false

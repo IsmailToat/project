@@ -7,6 +7,9 @@ local Handle = Tool:WaitForChild("Handle")
 local Player = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- // CRITICAL: Wait for the Remote to exist before trying to connect //
+local Remote = Tool:WaitForChild("CombatEvent")
+
 local IDLE_ANIM_ID = "rbxassetid://131831147664844" 
 local SWING_ANIM_ID_1 = "rbxassetid://88825748279087"
 local SWING_ANIM_ID_2 = "rbxassetid://100344585400886"
@@ -17,7 +20,6 @@ local CrosshairOffset = Vector2.new(40, 0)
 local SwingCooldown = 0.15 
 local BlockCooldown = 1.0 
 
---// UI SETUP
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "SwordUI"
 ScreenGui.Parent = Player:WaitForChild("PlayerGui")
@@ -88,8 +90,35 @@ local function UpdateBlockUI()
 	end
 end
 
+-- // LISTENER FOR PARRY SUCCESS (NEW) //
+Remote.OnClientEvent:Connect(function(Action)
+	if Action == "ParrySuccess" then
+		print("CLIENT: PARRY RESET RECEIVED! Cooldown cleared.")
+		
+		-- 1. Reset Logic States
+		IsBlocking = false
+		LastBlockRelease = 0 -- IMPORTANT: Setting this to 0 means (Now - 0) > 1.0, so valid immediately
+		
+		-- 2. Stop Visuals
+		if Tracks.Block then Tracks.Block:Stop(0.1) end
+		if ParrySpark then ParrySpark.Enabled = false end
+		
+		-- 3. Hide UI immediately
+		BarBG.Visible = false
+	end
+end)
+
+--
+
 Tool.Activated:Connect(function()
 	if Debounce or IsBlocking then return end
+	
+	-- // NEW: CHECK FOR PHASE SHIFT //
+	local Char = Player.Character
+	if Char and Char:GetAttribute("IsPhaseShifted") == true then
+		return -- Do nothing if phase shifted
+	end
+	
 	Debounce = true
 
 	if Tracks.Swing1 and Tracks.Swing2 then
@@ -104,9 +133,7 @@ Tool.Activated:Connect(function()
 	end
 	Sound:Play()
 
-	local Remote = Tool:WaitForChild("CombatEvent", 2)
 	if Remote then 
-		-- Send Attack Direction
 		Remote:FireServer("Attack", Camera.CFrame.LookVector) 
 	end
 
@@ -118,6 +145,7 @@ UserInputService.InputBegan:Connect(function(Input, P)
 	if P or Tool.Parent ~= Player.Character then return end
 
 	if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Debounce then
+		-- Check Cooldown
 		if os.clock() - LastBlockRelease < BlockCooldown then return end
 
 		IsBlocking = true
@@ -132,11 +160,7 @@ UserInputService.InputBegan:Connect(function(Input, P)
 			end)
 		end
 
-		local Remote = Tool:FindFirstChild("CombatEvent")
-		if Remote then 
-			-- // UPDATED: Send Block Direction //
-			Remote:FireServer("BlockStart", Camera.CFrame.LookVector) 
-		end
+		Remote:FireServer("BlockStart", Camera.CFrame.LookVector) 
 	end
 end)
 
@@ -145,6 +169,7 @@ UserInputService.InputEnded:Connect(function(Input)
 		if IsBlocking then 
 			IsBlocking = false
 			LastBlockRelease = os.clock() 
+			
 			if ParrySpark then ParrySpark.Enabled = false end
 			if Tracks.Block then Tracks.Block:Stop(0.1) end
 
@@ -154,8 +179,7 @@ UserInputService.InputEnded:Connect(function(Input)
 				if not IsBlocking then BarBG.Visible = false end
 			end)
 
-			local Remote = Tool:FindFirstChild("CombatEvent")
-			if Remote then Remote:FireServer("BlockEnd") end
+			Remote:FireServer("BlockEnd") 
 		end
 	end
 end)
